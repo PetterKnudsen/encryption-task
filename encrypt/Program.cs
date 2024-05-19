@@ -33,3 +33,23 @@ Changes in the number of processing elements should be reflected by the executio
 Improvement in performance is achieved when execution time decreases.
 
 """;
+
+string EncryptWord(string word, int iterations)
+{
+    // TODO - implement
+    return "";
+}
+
+void WriteListToFile(IEnumerable<string> wordList)
+{
+    // TODO - implement
+}
+
+IEnumerable<string> GetWordArray()
+{
+    var textWithNoNewLines = textToEncrypt.Replace("\n", "");
+    // The task doesn't specify what a word is
+    // So to make it simple, I've decided not to handle
+    // Extra characters in words, like ',' and '.'
+    return textWithNoNewLines.Split(' ');
+}
