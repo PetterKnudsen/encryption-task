@@ -69,8 +69,6 @@ void CompleteTask()
     var wordArray = GetWordArray();
 
     // Then, we encrypt the words
-    // I'm not 100% sure what "Samle de krypterte ordene i en array med index til ordets posisjon." means.
-    // For this task I've decided that it simply means that the encrypted word array matches up to the non encrypted word array.
     var encryptedWords = EncryptWordArray(wordArray.ToList(), encryptionIterations, iv, key);
 
     var encryptedWordList = encryptedWords.ToList();
@@ -78,11 +76,12 @@ void CompleteTask()
     // Finally, we write the encrypted array to a text file
     WriteListToFile(encryptedWordList, "encryptedWords.txt");
 
-    var decryptedWords = DecryptWordArray(encryptedWordList, encryptionIterations, iv, key);
+    
+    // Code below can be used to verify the result, but it takes some time to execute 
+    // var decryptedWords = DecryptWordArray(encryptedWordList, encryptionIterations, iv, key);
+    //WriteListToFile(decryptedWords, "decrypted.txt");
 
 
-    // As a double check - decrypt the array again to see if the decrypted text matches the original
-    WriteListToFile(decryptedWords, "decrypted.txt");
 }
 
 IEnumerable<string> GetWordArray()
@@ -107,16 +106,15 @@ IEnumerable<string> EncryptWordArray(List<string> array, int iterations, byte[] 
 
         // Log so that progress is visible
         Console.WriteLine($"Done with {word}");
+        // Since encryption is done in parallell it means we have to keep track of the index in order
+        // to create the original order of encrypted words
         encryptionResults.Add(new EncryptionResult
         {
             Index = index,
             Result = result
         });
     });
-
-    // Write result so that it can be verified, encrypting 5000 times takes a long time.
-    WriteEncryptionResultsToFile(encryptionResults);
-
+    
     // Create an empty array we can use to store encrypted words in correct placement
     var results = Enumerable.Repeat(string.Empty, encryptionResults.Count).ToArray();
     foreach (var encryptionResult in encryptionResults)
@@ -165,20 +163,7 @@ void WriteListToFile(IEnumerable<string> wordList, string fileName)
     }
 }
 
-// This function is simply so that the result can be verified
-void WriteEncryptionResultsToFile(IEnumerable<EncryptionResult> encryptionResults)
-{
-    const string docPath = "./";
-    using var outputFile = new StreamWriter(Path.Combine(docPath, "encryptionResults.txt"));
 
-    foreach (var result in encryptionResults)
-    {
-        // Write some empty lines above/below so that the result file has some "air" to it
-        outputFile.WriteLine("");
-        outputFile.WriteLine(JsonSerializer.Serialize(result));
-        outputFile.WriteLine("");
-    }
-}
 
 IEnumerable<string> DecryptWordArray(List<string> array, int iterations,  byte[] iv, byte[] key)
 {
@@ -197,10 +182,7 @@ IEnumerable<string> DecryptWordArray(List<string> array, int iterations,  byte[]
             Result = result
         });
     });
-
-    // Write result so that it can be verified, encrypting 5000 times takes a long time.
-    WriteEncryptionResultsToFile(decryptionResults);
-
+    
     // Create an empty array we can use to store encrypted words in correct placement
     var results = Enumerable.Repeat(string.Empty, decryptionResults.Count).ToArray();
     foreach (var encryptionResult in decryptionResults)
