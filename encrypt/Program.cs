@@ -9,6 +9,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 const int encryptionIterations = 5000;
 
@@ -47,17 +48,42 @@ const string textToEncrypt = """
                              """;
 
 
-// First, we create an array out of the words in the text
-var wordArray = GetWordArray();
+CompleteTask();
 
-// Then, we encrypt the words
-// I'm not 100% sure what "Samle de krypterte ordene i en array med index til ordets posisjon." means.
-// For this task I've decided that it simply means that the encrypted word array matches up to the non encrypted word array.
-var encryptedWords = EncryptWordArray(wordArray, encryptionIterations);
-
-// Finally, we write the encrypted array to a text file
-WriteListToFile(encryptedWords);
 return;
+
+
+void CompleteTask()
+{
+    // Using aes to encrypt
+    using var aes = Aes.Create();
+    aes.KeySize = 256;
+
+    aes.GenerateKey();
+    aes.GenerateIV();
+
+    var iv = aes.IV;
+    var key = aes.Key;
+
+    // First, we create an array out of the words in the text
+    var wordArray = GetWordArray();
+
+    // Then, we encrypt the words
+    // I'm not 100% sure what "Samle de krypterte ordene i en array med index til ordets posisjon." means.
+    // For this task I've decided that it simply means that the encrypted word array matches up to the non encrypted word array.
+    var encryptedWords = EncryptWordArray(wordArray.ToList(), encryptionIterations, iv, key);
+
+    var encryptedWordList = encryptedWords.ToList();
+    
+    // Finally, we write the encrypted array to a text file
+    WriteListToFile(encryptedWordList, "encryptedWords.txt");
+
+    var decryptedWords = DecryptWordArray(encryptedWordList, encryptionIterations, iv, key);
+
+
+    // As a double check - decrypt the array again to see if the decrypted text matches the original
+    WriteListToFile(decryptedWords, "decrypted.txt");
+}
 
 IEnumerable<string> GetWordArray()
 {
@@ -69,50 +95,147 @@ IEnumerable<string> GetWordArray()
     return textWithNoNewLines.Split(' ');
 }
 
-IEnumerable<string> EncryptWordArray(IEnumerable<string> array, int iterations)
+IEnumerable<string> EncryptWordArray(List<string> array, int iterations, byte[] iv, byte[] key)
 {
-    using var aes = Aes.Create();
-    aes.GenerateKey();
-    aes.GenerateIV();
-    var key = aes.Key;
-    var iv = aes.IV;
+    var encryptionResults = new ConcurrentBag<EncryptionResult>();
 
-    var results = new ConcurrentBag<string>();
-
-    Parallel.ForEach(array, word =>
+    // This takes a good while to complete
+    Parallel.ForEach(array, (word, _, index) =>
     {
-        Console.WriteLine($"Starting with {word}");
-
         var result = word;
-        for (var i = 0; i < iterations; i++)
-        {
-            result = EncryptWord(result, key, iv, aes);
-        }
+        result = EncryptWord(result, iterations, iv, key);
 
-        Console.WriteLine($"Done with {word} - result {result}");
-        results.Add(result);
+        // Log so that progress is visible
+        Console.WriteLine($"Done with {word}");
+        encryptionResults.Add(new EncryptionResult
+        {
+            Index = index,
+            Result = result
+        });
     });
+
+    // Write result so that it can be verified, encrypting 5000 times takes a long time.
+    WriteEncryptionResultsToFile(encryptionResults);
+
+    // Create an empty array we can use to store encrypted words in correct placement
+    var results = Enumerable.Repeat(string.Empty, encryptionResults.Count).ToArray();
+    foreach (var encryptionResult in encryptionResults)
+    {
+        results[encryptionResult.Index] = encryptionResult.Result;
+    }
 
     return results;
 }
 
-string EncryptWord(string word, byte[] key, byte[] iv, SymmetricAlgorithm algorithm)
+static string EncryptWord(string word, int iterations, byte[] iv, byte[] key)
 {
-    var wordBytes = Encoding.UTF8.GetBytes(word);
-    using var encryptor = algorithm.CreateEncryptor(key, iv);
-    using var memoryStream = new MemoryStream();
-    using var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write);
-    cryptoStream.Write(wordBytes, 0, wordBytes.Length);
-    cryptoStream.FlushFinalBlock();
-    return Convert.ToBase64String(memoryStream.ToArray());
+    using var aes = Aes.Create();
+    aes.IV = iv;
+    aes.Key = key;
+    
+    var encryptedBytes = Encoding.UTF8.GetBytes(word);
+
+    for (var i = 0; i < iterations; i++)
+    {
+        using var ms = new MemoryStream();
+        using (var cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
+        {
+            cs.Write(encryptedBytes, 0, encryptedBytes.Length);
+            cs.Close();
+        }
+
+        encryptedBytes = ms.ToArray();
+    }
+
+    return Convert.ToBase64String(encryptedBytes);
 }
 
-void WriteListToFile(IEnumerable<string> wordList)
+void WriteListToFile(IEnumerable<string> wordList, string fileName)
 {
     const string docPath = "./";
-    using var outputFile = new StreamWriter(Path.Combine(docPath, "encryptedWords.txt"));
+    using var outputFile = new StreamWriter(Path.Combine(docPath, fileName));
     // The task does not specify how it wants the array written to a file,
-    // so I've decided to write every word back to a file, like the original text.
-    // There is a "loss" of new lines from the original text, but I don't think that matters based on the task description
-    outputFile.Write(string.Join(" ", wordList));
+    // so I've decided to write every word back to a file on their own line
+    foreach (var word in wordList)
+    {
+        // Write some empty lines above/below so that the result file has some "air" to it
+        outputFile.WriteLine("");
+        outputFile.WriteLine(word);
+        outputFile.WriteLine("");
+    }
+}
+
+// This function is simply so that the result can be verified
+void WriteEncryptionResultsToFile(IEnumerable<EncryptionResult> encryptionResults)
+{
+    const string docPath = "./";
+    using var outputFile = new StreamWriter(Path.Combine(docPath, "encryptionResults.txt"));
+
+    foreach (var result in encryptionResults)
+    {
+        // Write some empty lines above/below so that the result file has some "air" to it
+        outputFile.WriteLine("");
+        outputFile.WriteLine(JsonSerializer.Serialize(result));
+        outputFile.WriteLine("");
+    }
+}
+
+IEnumerable<string> DecryptWordArray(List<string> array, int iterations,  byte[] iv, byte[] key)
+{
+    var decryptionResults = new ConcurrentBag<EncryptionResult>();
+
+    // This takes a good while to complete
+    Parallel.ForEach(array, (word, _, index) =>
+    {
+        var result = word;
+        result = DecryptWord(result, iterations, iv, key);
+
+        // Just reuse EncryptionResult class, this isnt part of the task anyway
+        decryptionResults.Add(new EncryptionResult
+        {
+            Index = index,
+            Result = result
+        });
+    });
+
+    // Write result so that it can be verified, encrypting 5000 times takes a long time.
+    WriteEncryptionResultsToFile(decryptionResults);
+
+    // Create an empty array we can use to store encrypted words in correct placement
+    var results = Enumerable.Repeat(string.Empty, decryptionResults.Count).ToArray();
+    foreach (var encryptionResult in decryptionResults)
+    {
+        results[encryptionResult.Index] = encryptionResult.Result;
+    }
+
+    return results;
+}
+
+static string DecryptWord(string encryptedWord, int iterations,  byte[] iv, byte[] key)
+{
+    using var aes = Aes.Create();
+    aes.IV = iv;
+    aes.Key = key;
+    
+    var encryptedBytes = Convert.FromBase64String(encryptedWord);
+
+    for (var i = 0; i < iterations; i++)
+    {
+        using var ms = new MemoryStream();
+        using (var cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Write))
+        {
+            cs.Write(encryptedBytes, 0, encryptedBytes.Length);
+            cs.Close();
+        }
+
+        encryptedBytes = ms.ToArray();
+    }
+
+    return Encoding.UTF8.GetString(encryptedBytes);
+}
+
+internal class EncryptionResult
+{
+    public long Index { get; set; }
+    public string Result { get; set; }
 }
