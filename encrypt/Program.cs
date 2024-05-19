@@ -6,6 +6,10 @@
 //
 
 
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
+
 const int encryptionIterations = 5000;
 
 const string textToEncrypt = """
@@ -42,32 +46,6 @@ const string textToEncrypt = """
 
                              """;
 
-string EncryptWord(string word, int iterations)
-{
-    // TODO - implement
-    return "test";
-}
-
-void WriteListToFile(IEnumerable<string> wordList)
-{
-    // Finally, we write the encrypted array to a text file
-    const string docPath = "./";
-    using var outputFile = new StreamWriter(Path.Combine(docPath, "encryptedWords.txt"));
-    // The task does not specify how it wants the array written to a file,
-    // so I've decided to write every word back to a file, like the original text.
-    // There is a "loss" of new lines from the original text, but I don't think that matters based on the task description
-    outputFile.Write(string.Join(" ", wordList));
-}
-
-IEnumerable<string> GetWordArray()
-{
-    var textWithNoNewLines = textToEncrypt.Replace("\n", "");
-    // The task doesn't specify what a word is
-    // So to make it simple, I've decided not to handle
-    // Extra characters in words, like ',' and '.'
-    return textWithNoNewLines.Split(' ');
-}
-
 
 // First, we create an array out of the words in the text
 var wordArray = GetWordArray();
@@ -75,6 +53,66 @@ var wordArray = GetWordArray();
 // Then, we encrypt the words
 // I'm not 100% sure what "Samle de krypterte ordene i en array med index til ordets posisjon." means.
 // For this task I've decided that it simply means that the encrypted word array matches up to the non encrypted word array.
-var encryptedWords = wordArray.Select(word => EncryptWord(word, encryptionIterations));
+var encryptedWords = EncryptWordArray(wordArray, encryptionIterations);
 
+// Finally, we write the encrypted array to a text file
 WriteListToFile(encryptedWords);
+return;
+
+IEnumerable<string> GetWordArray()
+{
+    var textWithNoNewLines = textToEncrypt.Replace("\n", "");
+    // The task doesn't specify what a word is
+    // So to make it simple, I've decided not to handle
+    // Extra characters in words, like ',' and '.'
+    // If you wanted to you could use regex to make the split smarter
+    return textWithNoNewLines.Split(' ');
+}
+
+IEnumerable<string> EncryptWordArray(IEnumerable<string> array, int iterations)
+{
+    using var aes = Aes.Create();
+    aes.GenerateKey();
+    aes.GenerateIV();
+    var key = aes.Key;
+    var iv = aes.IV;
+
+    var results = new ConcurrentBag<string>();
+
+    Parallel.ForEach(array, word =>
+    {
+        Console.WriteLine($"Starting with {word}");
+
+        var result = word;
+        for (var i = 0; i < iterations; i++)
+        {
+            result = EncryptWord(result, key, iv, aes);
+        }
+
+        Console.WriteLine($"Done with {word} - result {result}");
+        results.Add(result);
+    });
+
+    return results;
+}
+
+string EncryptWord(string word, byte[] key, byte[] iv, SymmetricAlgorithm algorithm)
+{
+    var wordBytes = Encoding.UTF8.GetBytes(word);
+    using var encryptor = algorithm.CreateEncryptor(key, iv);
+    using var memoryStream = new MemoryStream();
+    using var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write);
+    cryptoStream.Write(wordBytes, 0, wordBytes.Length);
+    cryptoStream.FlushFinalBlock();
+    return Convert.ToBase64String(memoryStream.ToArray());
+}
+
+void WriteListToFile(IEnumerable<string> wordList)
+{
+    const string docPath = "./";
+    using var outputFile = new StreamWriter(Path.Combine(docPath, "encryptedWords.txt"));
+    // The task does not specify how it wants the array written to a file,
+    // so I've decided to write every word back to a file, like the original text.
+    // There is a "loss" of new lines from the original text, but I don't think that matters based on the task description
+    outputFile.Write(string.Join(" ", wordList));
+}
