@@ -9,7 +9,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 const int encryptionIterations = 5000;
 
@@ -72,16 +71,14 @@ void CompleteTask()
     var encryptedWords = EncryptWordArray(wordArray.ToList(), encryptionIterations, iv, key);
 
     var encryptedWordList = encryptedWords.ToList();
-    
+
     // Finally, we write the encrypted array to a text file
     WriteListToFile(encryptedWordList, "encryptedWords.txt");
 
-    
+
     // Code below can be used to verify the result, but it takes some time to execute 
     // var decryptedWords = DecryptWordArray(encryptedWordList, encryptionIterations, iv, key);
-    //WriteListToFile(decryptedWords, "decrypted.txt");
-
-
+    // WriteListToFile(decryptedWords, "decrypted.txt");
 }
 
 IEnumerable<string> GetWordArray()
@@ -98,14 +95,29 @@ IEnumerable<string> EncryptWordArray(List<string> array, int iterations, byte[] 
 {
     var encryptionResults = new ConcurrentBag<EncryptionResult>();
 
+    // Keep a track of encrypted values, if the same word comes up again we can simply re-insert it
+    // Another, potentially better way, could be to create a set of the words in the array, encrypt them
+    // and then loop through the text. This would also be more efficient if the words didn't contain 
+    // certain characters, E.G '.', ',' etc. 
+    var encryptedWordDict = new ConcurrentDictionary<string, string>();
+
     // This takes a good while to complete
     Parallel.ForEach(array, (word, _, index) =>
     {
         var result = word;
-        result = EncryptWord(result, iterations, iv, key);
+        if (encryptedWordDict.TryGetValue(word, out var value))
+        {
+            Console.WriteLine($"Skipping '{word}' since it was already in dictionary");
+            result = value;
+        }
+        else
+        {
+            result = EncryptWord(result, iterations, iv, key);
+            encryptedWordDict.AddOrUpdate(word, result, (_, _) => result);
+            // Log so that progress is visible
+            Console.WriteLine($"Done with {word}");
+        }
 
-        // Log so that progress is visible
-        Console.WriteLine($"Done with {word}");
         // Since encryption is done in parallell it means we have to keep track of the index in order
         // to create the original order of encrypted words
         encryptionResults.Add(new EncryptionResult
@@ -114,13 +126,14 @@ IEnumerable<string> EncryptWordArray(List<string> array, int iterations, byte[] 
             Result = result
         });
     });
-    
+
     // Create an empty array we can use to store encrypted words in correct placement
     var results = Enumerable.Repeat(string.Empty, encryptionResults.Count).ToArray();
     foreach (var encryptionResult in encryptionResults)
     {
         results[encryptionResult.Index] = encryptionResult.Result;
     }
+
 
     return results;
 }
@@ -130,7 +143,7 @@ static string EncryptWord(string word, int iterations, byte[] iv, byte[] key)
     using var aes = Aes.Create();
     aes.IV = iv;
     aes.Key = key;
-    
+
     var encryptedBytes = Encoding.UTF8.GetBytes(word);
 
     for (var i = 0; i < iterations; i++)
@@ -164,16 +177,32 @@ void WriteListToFile(IEnumerable<string> wordList, string fileName)
 }
 
 
-
-IEnumerable<string> DecryptWordArray(List<string> array, int iterations,  byte[] iv, byte[] key)
+IEnumerable<string> DecryptWordArray(List<string> array, int iterations, byte[] iv, byte[] key)
 {
     var decryptionResults = new ConcurrentBag<EncryptionResult>();
 
+    // Keep a track of encrypted values, if the same word comes up again we can simply re-insert it
+    // Another, potentially better way, could be to create a set of the words in the array, encrypt them
+    // and then loop through the text. This would also be more efficient if the words didn't contain 
+    // certain characters, E.G '.', ',' etc. 
+    var encryptedWordDict = new ConcurrentDictionary<string, string>();
+    
     // This takes a good while to complete
     Parallel.ForEach(array, (word, _, index) =>
     {
         var result = word;
-        result = DecryptWord(result, iterations, iv, key);
+        if (encryptedWordDict.TryGetValue(word, out var value))
+        {
+            Console.WriteLine($"Skipping '{value}' since it was already in dictionary");
+            result = value;
+        }
+        else
+        {
+            result = DecryptWord(result, iterations, iv, key);
+            encryptedWordDict.AddOrUpdate(word, result, (_, _) => result);
+            // Log so that progress is visible
+            Console.WriteLine($"Done with {result}");
+        }
 
         // Just reuse EncryptionResult class, this isnt part of the task anyway
         decryptionResults.Add(new EncryptionResult
@@ -182,7 +211,7 @@ IEnumerable<string> DecryptWordArray(List<string> array, int iterations,  byte[]
             Result = result
         });
     });
-    
+
     // Create an empty array we can use to store encrypted words in correct placement
     var results = Enumerable.Repeat(string.Empty, decryptionResults.Count).ToArray();
     foreach (var encryptionResult in decryptionResults)
@@ -193,12 +222,12 @@ IEnumerable<string> DecryptWordArray(List<string> array, int iterations,  byte[]
     return results;
 }
 
-static string DecryptWord(string encryptedWord, int iterations,  byte[] iv, byte[] key)
+static string DecryptWord(string encryptedWord, int iterations, byte[] iv, byte[] key)
 {
     using var aes = Aes.Create();
     aes.IV = iv;
     aes.Key = key;
-    
+
     var encryptedBytes = Convert.FromBase64String(encryptedWord);
 
     for (var i = 0; i < iterations; i++)
